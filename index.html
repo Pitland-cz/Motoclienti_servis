@@ -167,11 +167,14 @@ async function loadAll(){
   ]);
   clients=c.data||[];bikes=b.data||[];todos=t.data||[];
 }
+const activeClients=()=>clients.filter(c=>!c.archived);
+const activeBikes=()=>bikes.filter(b=>!b.archived&&!(clients.find(c=>c.id===b.client_id)?.archived));
 
 /* ---------- render ---------- */
 function render(){
   const m=$('main');
   if(view.name==='bike')return renderBike(m);
+  if(view.name==='client')return renderClient(m);
   // home
   let h='';
   if(user.role==='admin'){
@@ -183,12 +186,12 @@ function render(){
   if(tab==='moto'&&user.role==='admin'){
     h+=`<div class="row" style="margin-bottom:10px;gap:8px">
       <button class="btn sm" onclick="openClientForm()">+ Klient</button>
-      <button class="btn sm" onclick="openBikeForm()">+ Motorka</button>
+      ${clients.some(c=>c.archived)?`<button class="btn sm ghost" onclick="showArchive()">Archiv</button>`:''}
     </div>`;
-    if(!clients.length)h+=`<div class="card mut">Zatím žádní klienti. Přidej prvního tlačítkem výše, nebo prostě nadiktuj záznam — jméno a motorku pak přiřadíš.</div>`;
-    for(const c of clients){
-      const cb=bikes.filter(b=>b.client_id===c.id);
-      h+=`<div class="card"><div class="row"><div class="grow title">${esc(c.name)}</div><span class="mut small">${cb.length} moto</span></div>`;
+    if(!activeClients().length)h+=`<div class="card mut">Zatím žádní klienti. Přidej prvního tlačítkem + Klient, motorky pak přidáš uvnitř klienta.</div>`;
+    for(const c of activeClients()){
+      const cb=bikes.filter(b=>b.client_id===c.id&&!b.archived);
+      h+=`<div class="card"><div class="row" style="cursor:pointer" onclick="view={name:'client',id:'${c.id}'};render()"><div class="grow title">${esc(c.name)}</div><span class="mut small">${cb.length} moto</span><span class="mut">›</span></div>`;
       for(const b of cb){
         const nt=openTodos().filter(t=>t.bike_id===b.id).length;
         h+=`<div class="row" style="padding:9px 0 0;cursor:pointer" onclick="view={name:'bike',id:'${b.id}'};render()">
@@ -224,14 +227,80 @@ function render(){
 }
 const openTodos=()=>todos.filter(t=>!t.done);
 
+function renderClient(m){
+  const c=clients.find(x=>x.id===view.id);
+  if(!c){view={name:'home'};return render();}
+  const cb=bikes.filter(b=>b.client_id===c.id&&!b.archived);
+  const ab=bikes.filter(b=>b.client_id===c.id&&b.archived);
+  let h=`<button class="btn sm ghost" onclick="view={name:'home'};render()" style="margin-bottom:8px">‹ Zpět</button>
+  <div class="card"><div class="title" style="font-size:18px">${esc(c.name)}</div>
+  ${c.note?`<div class="mut">${esc(c.note)}</div>`:''}
+  <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+    <button class="btn sm" onclick="openBikeForm('${c.id}')">+ Motorka</button>
+    <button class="btn sm ghost" onclick="editClient('${c.id}')">Upravit</button>
+    <button class="btn sm ghost" style="color:var(--yel)" onclick="archiveClient('${c.id}')">Archivovat klienta</button>
+  </div></div>`;
+  h+=`<h2>Motorky</h2>`;
+  if(!cb.length)h+=`<div class="card mut">Žádná motorka. Přidej ji tlačítkem + Motorka.</div>`;
+  for(const b of cb){
+    const nt=openTodos().filter(t=>t.bike_id===b.id).length;
+    h+=`<div class="card tap" onclick="view={name:'bike',id:'${b.id}'};render()"><div class="row">
+      <div class="grow title">${esc(b.start_number?b.start_number+' – ':'')}${esc(b.brand_model)}</div>
+      ${nt?`<span class="badge warn">${nt} úkol${nt>1?'y':''}</span>`:''}<span class="mut">›</span></div></div>`;
+  }
+  if(ab.length){h+=`<h2>Archiv motorek</h2>`;
+    for(const b of ab)h+=`<div class="card"><div class="row"><div class="grow mut">${esc(b.start_number?b.start_number+' – ':'')}${esc(b.brand_model)}</div>
+      <button class="btn sm ghost" onclick="unarchiveBike('${b.id}')">Obnovit</button></div></div>`;}
+  m.innerHTML=h;
+}
+function editClient(id){
+  const c=clients.find(x=>x.id===id);
+  sheet(`<h3>Upravit klienta</h3>
+  <label>Jméno</label><input id="fName" value="${esc(c.name)}">
+  <label>Poznámka</label><input id="fNote" value="${esc(c.note??'')}">
+  <button class="btn red full" onclick="updClient('${id}')">Uložit</button>`);
+}
+async function updClient(id){
+  const name=$('fName').value.trim();if(!name)return toast('Zadej jméno');
+  await db.from('mc_clients').update({name,note:$('fNote').value.trim()||null}).eq('id',id);
+  closeSheet();await loadAll();render();
+}
+async function archiveClient(id){
+  if(!confirm('Archivovat klienta i s jeho motorkami? (data zůstanou, jen zmizí ze seznamu)'))return;
+  await db.from('mc_clients').update({archived:true}).eq('id',id);
+  view={name:'home'};await loadAll();render();toast('Klient archivován');
+}
+async function unarchiveClient(id){
+  await db.from('mc_clients').update({archived:false}).eq('id',id);
+  await loadAll();render();toast('Klient obnoven');
+}
+async function archiveBike(id){
+  await db.from('mc_bikes').update({archived:true}).eq('id',id);
+  closeSheet();view={name:'home'};await loadAll();render();toast('Motorka archivována');
+}
+async function unarchiveBike(id){
+  await db.from('mc_bikes').update({archived:false}).eq('id',id);
+  await loadAll();render();toast('Motorka obnovena');
+}
+function showArchive(){
+  const ac=clients.filter(c=>c.archived);
+  let h=`<h3>Archiv klientů</h3>`;
+  if(!ac.length)h+=`<div class="card mut">Archiv je prázdný.</div>`;
+  for(const c of ac)h+=`<div class="card"><div class="row"><div class="grow mut">${esc(c.name)}</div>
+    <button class="btn sm ghost" onclick="unarchiveClient('${c.id}');closeSheet()">Obnovit</button></div></div>`;
+  h+=`<button class="btn full" onclick="closeSheet()">Zavřít</button>`;
+  sheet(h);
+}
+
 async function renderBike(m){
   const b=bikes.find(x=>x.id===view.id);
   if(!b){view={name:'home'};return render();}
   const c=clients.find(x=>x.id===b.client_id);
   m.innerHTML=`<div class="spin"></div>`;
   const{data:recs}=await db.from('mc_service_records').select('*').eq('bike_id',b.id).order('record_date',{ascending:false}).order('created_at',{ascending:false});
+  curRecs=recs||[];
   const bt=openTodos().filter(t=>t.bike_id===b.id);
-  let h=`<button class="btn sm ghost" onclick="view={name:'home'};render()" style="margin-bottom:8px">‹ Zpět</button>
+  let h=`<button class="btn sm ghost" onclick="view={name:'client',id:'${b.client_id}'};render()" style="margin-bottom:8px">‹ Zpět</button>
   <div class="card"><div class="title" style="font-size:18px">${esc(b.start_number?b.start_number+' – ':'')}${esc(b.brand_model)}</div>
   <div class="mut">${esc(c?.name??'')}${b.note?' · '+esc(b.note):''}</div>
   ${user.role==='admin'?`<div class="row" style="margin-top:10px;gap:8px"><button class="btn sm" onclick="openRecForm('${b.id}')">+ Ruční záznam</button><button class="btn sm ghost" onclick="editBike('${b.id}')">Upravit</button></div>`:''}
@@ -248,7 +317,7 @@ async function renderBike(m){
       <td class="num">${r.odometer_km??'–'}</td>
       <td>${esc(r.work_done)}${r.needs_review?' <span class="badge warn">ověřit</span>':''}
         ${(r.photo_urls||[]).map(u=>`<br><a href="${esc(u)}" target="_blank"><img class="photoThumb" src="${esc(u)}"></a>`).join('')}</td>
-      <td><button class="btn sm ghost" onclick="addPhoto('${r.id}')">📷</button></td></tr>`;
+      <td style="white-space:nowrap"><button class="btn sm ghost" onclick="openRecEdit('${r.id}')">✎</button><button class="btn sm ghost" onclick="addPhoto('${r.id}')">📷</button></td></tr>`;
     }
     h+=`</table></div>`;}
   m.innerHTML=h;
@@ -271,13 +340,15 @@ function openClientForm(){
 }
 async function saveClient(){
   const name=$('fName').value.trim();if(!name)return toast('Zadej jméno');
-  await db.from('mc_clients').insert({name,note:$('fNote').value.trim()||null});
-  closeSheet();await loadAll();render();toast('Klient přidán');
+  const{data}=await db.from('mc_clients').insert({name,note:$('fNote').value.trim()||null}).select().single();
+  closeSheet();await loadAll();
+  if(data)view={name:'client',id:data.id};
+  render();toast('Klient přidán — teď mu přidej motorky');
 }
-function openBikeForm(){
-  if(!clients.length)return toast('Nejdřív přidej klienta');
+function openBikeForm(preClientId){
+  if(!activeClients().length)return toast('Nejdřív přidej klienta');
   sheet(`<h3>Nová motorka</h3>
-  <label>Klient</label><select id="fClient">${clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+  <label>Klient</label><select id="fClient">${activeClients().map(c=>`<option value="${c.id}"${c.id===preClientId?' selected':''}>${esc(c.name)}</option>`).join('')}</select>
   <label>Startovní číslo (např. 415)</label><input id="fNum" inputmode="numeric">
   <label>Značka a model (např. Aprilia RS660)</label><input id="fModel">
   <label>Poznámka</label><input id="fNote">
@@ -295,7 +366,8 @@ function editBike(id){
   <label>Značka a model</label><input id="fModel" value="${esc(b.brand_model)}">
   <label>Poznámka</label><input id="fNote" value="${esc(b.note??'')}">
   <button class="btn red full" onclick="updBike('${id}')">Uložit</button>
-  <button class="btn full ghost" style="color:var(--red)" onclick="delBike('${id}')">Smazat motorku</button>`);
+  <button class="btn full ghost" style="color:var(--yel)" onclick="archiveBike('${id}')">Archivovat motorku</button>
+  <button class="btn full ghost" style="color:var(--red)" onclick="delBike('${id}')">Smazat motorku (i s historií)</button>`);
 }
 async function updBike(id){
   await db.from('mc_bikes').update({start_number:$('fNum').value.trim()||null,brand_model:$('fModel').value.trim(),note:$('fNote').value.trim()||null}).eq('id',id);
@@ -305,6 +377,26 @@ async function delBike(id){
   if(!confirm('Smazat motorku včetně historie?'))return;
   await db.from('mc_bikes').delete().eq('id',id);
   closeSheet();view={name:'home'};await loadAll();render();
+}
+let curRecs=[];
+function openRecEdit(recId){
+  const r=curRecs.find(x=>x.id===recId);if(!r)return;
+  sheet(`<h3>Upravit záznam</h3>
+  <label>Datum</label><input id="fDate" type="date" value="${r.record_date}">
+  <label>Najeté km</label><input id="fKm" inputmode="numeric" value="${r.odometer_km??''}">
+  <label>Co bylo uděláno</label><textarea id="fWork" rows="4">${esc(r.work_done)}</textarea>
+  <button class="btn red full" onclick="updRec('${recId}')">Uložit</button>
+  <button class="btn full ghost" style="color:var(--red)" onclick="delRec('${recId}')">Smazat záznam</button>`);
+}
+async function updRec(id){
+  const work=$('fWork').value.trim();if(!work)return toast('Popiš, co bylo uděláno');
+  await db.from('mc_service_records').update({record_date:$('fDate').value,odometer_km:parseInt($('fKm').value)||null,work_done:work,needs_review:false}).eq('id',id);
+  closeSheet();render();toast('Záznam upraven');
+}
+async function delRec(id){
+  if(!confirm('Smazat tento záznam?'))return;
+  await db.from('mc_service_records').delete().eq('id',id);
+  closeSheet();render();toast('Záznam smazán');
 }
 function openRecForm(bikeId){
   sheet(`<h3>Ruční záznam servisu</h3>
@@ -382,7 +474,7 @@ async function sendDictation(blob){
   const audio_base64=await blobToB64(blob);
   const payload={
     audio_base64,mime_type:recMime||'audio/webm',user_code:user.code,
-    bikes:bikes.map(b=>({id:b.id,label:bikeLabel(b)})),
+    bikes:activeBikes().map(b=>({id:b.id,label:bikeLabel(b)})),
   };
   let out;
   try{
