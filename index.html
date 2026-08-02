@@ -384,7 +384,8 @@ function openRecEdit(recId){
   sheet(`<h3>Upravit záznam</h3>
   <label>Datum</label><input id="fDate" type="date" value="${r.record_date}">
   <label>Najeté km</label><input id="fKm" inputmode="numeric" value="${r.odometer_km??''}">
-  <label>Co bylo uděláno</label><textarea id="fWork" rows="4">${esc(r.work_done)}</textarea>
+  <div class="row" style="margin-top:12px"><label class="grow" style="margin:0">Co bylo uděláno</label><button class="btn sm" id="fieldMicBtn" onclick="fieldMic()">🎤 Nadiktovat</button></div>
+  <textarea id="fWork" rows="4">${esc(r.work_done)}</textarea>
   <button class="btn red full" onclick="updRec('${recId}')">Uložit</button>
   <button class="btn full ghost" style="color:var(--red)" onclick="delRec('${recId}')">Smazat záznam</button>`);
 }
@@ -402,7 +403,8 @@ function openRecForm(bikeId){
   sheet(`<h3>Ruční záznam servisu</h3>
   <label>Datum</label><input id="fDate" type="date" value="${new Date().toISOString().slice(0,10)}">
   <label>Najeté km</label><input id="fKm" inputmode="numeric">
-  <label>Co bylo uděláno</label><textarea id="fWork" rows="3"></textarea>
+  <div class="row" style="margin-top:12px"><label class="grow" style="margin:0">Co bylo uděláno</label><button class="btn sm" id="fieldMicBtn" onclick="fieldMic()">🎤 Nadiktovat</button></div>
+  <textarea id="fWork" rows="3"></textarea>
   <button class="btn red full" onclick="saveRec('${bikeId}')">Uložit</button>`);
 }
 async function saveRec(bikeId){
@@ -442,6 +444,36 @@ function addPhoto(recId){
   inp.click();
 }
 
+/* ---------- field dictation (prepis do textoveho pole) ---------- */
+let fRec=null,fChunks=[],fMime='';
+async function fieldMic(){
+  const btn=$('fieldMicBtn');
+  if(fRec&&fRec.state==='recording'){fRec.stop();return;}
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    fMime=pickMime();fChunks=[];
+    fRec=new MediaRecorder(stream,fMime?{mimeType:fMime}:undefined);
+    fRec.ondataavailable=e=>fChunks.push(e.data);
+    fRec.onstop=async()=>{
+      stream.getTracks().forEach(t=>t.stop());
+      btn.textContent='⏳ Přepisuji…';btn.style.background='';
+      const blob=new Blob(fChunks,{type:fMime||'audio/webm'});
+      if(blob.size<2000){btn.textContent='🎤 Nadiktovat';return toast('Moc krátká nahrávka');}
+      try{
+        const audio_base64=await blobToB64(blob);
+        const r=await fetch(FN_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPA_KEY,'apikey':SUPA_KEY},body:JSON.stringify({mode:'transcribe',audio_base64,mime_type:fMime||'audio/webm',user_code:user.code})});
+        const out=await r.json();
+        if(out.error)throw new Error(out.error);
+        const ta=$('fWork');
+        ta.value=(ta.value.trim()?ta.value.trim()+' ':'')+(out.transcript||'');
+      }catch(e){toast('Chyba přepisu: '+e.message,4000);}
+      btn.textContent='🎤 Nadiktovat';
+    };
+    fRec.start();
+    btn.textContent='⏹ Zastavit';btn.style.background='var(--red)';
+  }catch(e){toast('Mikrofon nedostupný: '+e.message);}
+}
+
 /* ---------- dictation ---------- */
 let rec=null,chunks=[],recMime='';
 function pickMime(){
@@ -476,6 +508,10 @@ async function sendDictation(blob){
     audio_base64,mime_type:recMime||'audio/webm',user_code:user.code,
     bikes:activeBikes().map(b=>({id:b.id,label:bikeLabel(b)})),
   };
+  if(view.name==='bike'){
+    const cb=bikes.find(x=>x.id===view.id);
+    if(cb)payload.context_bike={id:cb.id,label:bikeLabel(cb)};
+  }
   let out;
   try{
     const r=await fetch(FN_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPA_KEY,'apikey':SUPA_KEY},body:JSON.stringify(payload)});
