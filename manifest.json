@@ -7,7 +7,15 @@
   "background_color": "#111114",
   "theme_color": "#111114",
   "icons": [
-    { "src": "https://jxrgmedujtxukgsllich.supabase.co/storage/v1/object/public/mc-app/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "https://jxrgmedujtxukgsllich.supabase.co/storage/v1/object/public/mc-app/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "https://jxrgmedujtxukgsllich.supabase.co/storage/v1/object/public/mc-app/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://jxrgmedujtxukgsllich.supabase.co/storage/v1/object/public/mc-app/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
   ]
 }
